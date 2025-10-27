@@ -99,3 +99,19 @@ set_program:
       description: Set program Id
       example: 24
       name: programId
+
+assign_room:
+  name: Assign room
+  description: Assign a vacuum to a room on the selected map.
+  target:
+    device:
+      integration: "miele"
+  fields:
+    mapId:
+      description: Map identifier to use when assigning the room.
+      example: 1
+      name: mapId
+    roomId:
+      description: Room identifier reported by the map overview.
+      example: 3
+      name: roomId
