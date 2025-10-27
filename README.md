@@ -55,6 +55,38 @@ Goto `Integrations` > `Add Integration` and select `Miele`. Sometimes you must r
 Follow instructions to authenticate with Miele cloud server. First, you'll provide the app credentials acquired at https://www.miele.com/developer/.
 Next, you'll sign in using your Miele account. Allow full access for the Home Assistant client.
 
+### How authentication works
+
+Home Assistant uses the official Miele OAuth2 endpoints. The integration depends on the client credentials that you register in the Miele developer portal and never hard-codes a token or password.
+
+**1. Register and store your client credentials** – When you enter the client ID and secret in the setup dialog, Home Assistant stores them as "application credentials". The integration declares this dependency in [`manifest.json`](custom_components/miele/manifest.json) and exposes the authorize and token URLs through [`application_credentials.py`](custom_components/miele/application_credentials.py).【F:custom_components/miele/manifest.json†L1-L25】【F:custom_components/miele/application_credentials.py†L1-L17】
+
+**2. Browser-based authorization** – The config flow (`custom_components/miele/config_flow.py`) extends Home Assistant's OAuth2 helpers. During onboarding the user is redirected to Miele's `authorize` endpoint with the client ID, secret, and locale parameters. After the user approves access, Miele calls back to Home Assistant with a short-lived authorization code. The framework converts that code into access and refresh tokens using the token endpoint and persists them inside the config entry data.【F:custom_components/miele/config_flow.py†L1-L104】
+
+**3. Token management during runtime** – Whenever Home Assistant sets up the config entry, it builds an `OAuth2Session` and asks it to `async_ensure_token_valid()`. If the access token is expired, the session transparently uses the refresh token to obtain a new one. The integration wraps this session with `AsyncConfigEntryAuth`, whose `async_get_access_token()` method always returns a fresh bearer token before delegating requests to `pymiele`.【F:custom_components/miele/__init__.py†L73-L123】【F:custom_components/miele/api.py†L1-L26】
+
+**4. Calling the Miele API** – Service calls such as `miele.raw` ultimately pass through the authenticated `pymiele` client. Every request includes the `Authorization: Bearer <token>` header sourced from the OAuth session, so the same refreshable token is used for status updates, actions, and room mapping requests.【F:custom_components/miele/api.py†L14-L25】
+
+In practice this means you authenticate once in the browser, and Home Assistant keeps the session alive by refreshing tokens for you. If the refresh token stops working (for example, because you revoke access on the Miele portal) the config entry will move into a re-authentication flow and prompt you to log in again.
+
+### Assigning robot vacuum rooms
+
+Miele's public API exposes a `/devices/{serial}/rooms` endpoint that assigns a robot vacuum to a room on the active map. The integration now mirrors that capability through the `miele.assign_room` service, so you no longer have to craft a custom `curl` request.【F:custom_components/miele/services.py†L174-L210】
+
+You can trigger the service from *Developer Tools → Services* in Home Assistant. Target the vacuum's device, set `mapId` to the numeric map identifier, and `roomId` to the room identifier reported by the map API. Optional keys supported by the API (for example, `levelId`) can be added as extra fields. A YAML example looks like this:
+
+```yaml
+service: miele.assign_room
+data:
+  mapId: 1
+  roomId: 3
+target:
+  device_id:
+    - 1234567890abcdef
+```
+
+Home Assistant converts the call to an authenticated `PUT /devices/<serial>/rooms` request behind the scenes, so the workflow matches the curl example exactly but keeps credentials and tokens managed by the integration.【F:custom_components/miele/api.py†L28-L58】
+
 ### Support - Wiki - Documentation
 
 Documentation (at least some...) can be found in the [wiki](https://github.com/astrandb/miele/wiki)

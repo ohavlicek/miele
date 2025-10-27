@@ -89,6 +89,14 @@ SERVICE_PROGRAM = cv.make_entity_service_schema(
     extra=vol.ALLOW_EXTRA,
 )
 
+SERVICE_ASSIGN_ROOM = cv.make_entity_service_schema(
+    {
+        vol.Required("mapId"): cv.positive_int,
+        vol.Required("roomId"): cv.positive_int,
+    },
+    extra=vol.ALLOW_EXTRA,
+)
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -203,6 +211,39 @@ async def async_setup_services(hass: HomeAssistant) -> None:  # noqa: C901
                     f"Service set_program: {ex.status} {ex.message}"
                 ) from ex
 
+    async def assign_room(call: ServiceCall):
+        serno = ""
+        _LOGGER.debug("Call: %s", call)
+        if not (our_entry_ids := await extract_our_config_entry_ids(call)):
+            raise HomeAssistantError(
+                "Failed to call service 'assign_room'. Config entry for target not found."
+            )
+        if CONF_DEVICE_ID not in call.data:
+            raise HomeAssistantError(
+                "Cannot call assign_room on entity. Only on device."
+            )
+        device_reg = dr.async_get(hass)
+        for ent in call.data[CONF_DEVICE_ID]:
+            device_entry = device_reg.async_get(ent)
+            for ident in device_entry.identifiers:
+                for val in ident:
+                    if val != DOMAIN:
+                        serno = val
+
+            _api = hass.data[DOMAIN][our_entry_ids[0]][API]
+            data = call.data.copy()
+            if CONF_ENTITY_ID in data:
+                data.pop(CONF_ENTITY_ID)
+            if CONF_DEVICE_ID in data:
+                data.pop(CONF_DEVICE_ID)
+
+            try:
+                await _api.assign_room(serno, data)
+            except aiohttp.ClientResponseError as ex:
+                raise HomeAssistantError(
+                    f"Service assign_room: {ex.status} {ex.message}"
+                ) from ex
+
     hass.services.async_register(
         DOMAIN, "process_action", send_process_action, SERVICE_PROCESS_ACTION
     )
@@ -211,3 +252,6 @@ async def async_setup_services(hass: HomeAssistant) -> None:  # noqa: C901
     )
     hass.services.async_register(DOMAIN, "raw", send_raw, SERVICE_RAW)
     hass.services.async_register(DOMAIN, "set_program", set_program, SERVICE_PROGRAM)
+    hass.services.async_register(
+        DOMAIN, "assign_room", assign_room, SERVICE_ASSIGN_ROOM
+    )
